@@ -1,34 +1,63 @@
-# Keystroke Accelerometer ML
+# Keystroke Accelerometer ML (TinyML-Style Dataset)
 
-This project contains a keystroke-labeled 3-axis accelerometer dataset and an accompanying analysis notebook used for machine learning experiments (e.g., keystroke classification from vibration signatures).
+This repository contains a keystroke-labeled 3-axis accelerometer dataset and an analysis notebook used for machine learning experiments (e.g., keystroke classification from vibration/vibration-like signatures).
 
-An Arduino streams accelerometer readings (X, Y, Z) over serial. A Python logger records those readings alongside keyboard keypress events with timestamps. The dataset can then be aligned by time and segmented into labeled windows for supervised learning.
+An Arduino streams accelerometer readings (X, Y, Z) over serial. A Python logger records those readings alongside keyboard keypress events with timestamps on the same host machine. The dataset can be aligned by time and segmented into labeled windows for supervised learning.
 
-## What this project is about
+## Goal
 
 Keystrokes produce small, repeatable vibration patterns that can be captured by a 3-axis accelerometer. The goal of this project is to support ML workflows such as:
-- **Keystroke classification** (predicting which key was pressed)
-- **Window-based feature extraction** (time- and frequency-domain features)
-- **Baseline model evaluation** and comparison across recording segments/sessions
+- keystroke classification (predict which key was pressed)
+- window-based feature extraction (time- and frequency-domain)
+- baseline model evaluation and comparison across recording segments/sessions
 
 ## Repository contents
 
+This repo contains four primary artifacts:
+
 - **`alphabet.ext`**  
-  Raw capture file. Primarily contains timestamped accelerometer samples, with key labels (e.g., `a`, `b`) embedded as separate timestamped rows that mark the start of labeled segments.
+  Raw capture file. Most rows contain timestamped accelerometer samples. Key labels (e.g., `a`, `b`) appear as separate timestamped rows with missing X/Y/Z values and are used to mark labeled segments.
 
 - **`RawAccelerometer.ino`**  
-  Arduino sketch used during data collection to read a 3-axis accelerometer and stream values over serial in the format:
+  Arduino sketch used during data collection to read a 3-axis accelerometer and stream values over serial as:
   `x,y,z`
 
 - **`serial.py`**  
-  Host-side Python logger that:
-  - reads accelerometer samples from the Arduino over serial
-  - records keyboard keypress events (labels)
-  - timestamps both streams on the same machine for alignment  
-  (The script writes CSV outputs on exit.)
+  Host-side logger that records two synchronized streams:
+  - accelerometer samples from Arduino serial
+  - keyboard keypress events (labels)  
+  Both streams are timestamped on the host machine to enable time alignment for downstream ML.
 
 - **`analysis.ipynb`**  
-  Notebook used to parse/clean the raw data, align labels with accelerometer samples, construct labeled windows, and run ML experiments.
+  Notebook for parsing/cleaning the raw data, aligning labels with accelerometer samples, constructing labeled datasets, and running baseline ML experiments.
+
+## Original data collection setup (high level)
+
+This dataset was originally recorded using the following workflow:
+
+1) **Arduino + accelerometer sensor**  
+   The Arduino streamed accelerometer readings over USB serial in CSV format (`x,y,z`).
+
+2) **Host-side logging + keyboard labels**  
+   The Python script (`serial.py`) ran on the host computer to:
+   - read the serial stream (accelerometer samples)
+   - capture keyboard keypress events (key down)
+   - timestamp both streams on the same machine for alignment
+
+3) **Analysis / ML preparation**  
+   The notebook (`analysis.ipynb`) parses the raw capture (`alphabet.ext`) and/or logger outputs to build labeled windows and run baseline ML experiments.
+
+> Note: I no longer have access to the original hardware setup to re-validate exact wiring/sensor model details. The scripts and files in this repository reflect the workflow and data format used to generate the dataset.
+
+## Raw data format (alphabet.ext)
+
+The raw capture follows a time-series pattern:
+
+- **Sensor sample rows** contain:
+  `timestamp, x, y, z`
+
+- **Label rows** contain a timestamp and a key label (e.g., `a`, `b`) with missing x/y/z values.
+  These label rows are used to mark the start of a labeled segment and associate nearby accelerometer samples with the corresponding keypress class.
 
 ## Data overview
 
@@ -37,44 +66,45 @@ Keystrokes produce small, repeatable vibration patterns that can be captured by 
 - **Timestamps:** recorded on the host machine for both sensor samples and key events
 - **Intended use:** create fixed-length windows around key events and train supervised ML models
 
-## Original data collection setup (high level)
+## Baseline ML approach (current)
 
-This dataset was originally recorded using the following workflow:
+The notebook contains an initial baseline using KNN to explore learnability and establish a starting point for classification experiments.
 
-1) **Arduino + accelerometer**  
-   An Arduino was connected to a 3-axis accelerometer sensor and programmed to stream readings over USB serial as `x,y,z`.
+Important evaluation note:
+- The current notebook includes an initial approach that uses a regressor with encoded class labels and prints `model.score(...)`.
+- For regressors, `.score()` returns **R²**, not classification accuracy. R² can be negative and should not be interpreted as an “accuracy” metric for multi-class key classification.
 
-2) **Host-side logging + keyboard labels**  
-   The Python script (`serial.py`) ran on the host computer to:
-   - read the serial stream (accelerometer samples)
-   - capture keyboard keypress events (labels)
-   - timestamp both streams on the same machine for time alignment
+This repository is shared primarily as:
+- a dataset + parsing reference for keystroke-labeled accelerometer data, and
+- a baseline starting point with documented limitations and clear next steps.
 
-3) **Analysis / ML preparation**  
-   The notebook (`analysis.ipynb`) parses the raw capture (`alphabet.ext`) and/or the logger outputs to create labeled windows for supervised ML experiments.
+## Results (current baseline)
 
-> Note: I no longer have access to the original hardware setup to re-validate exact wiring/sensor model details. The files in this repository reflect the workflow and data format used to generate the dataset.
+The current baseline results are not strong and do not generalize well. They are included to document the initial pipeline and identify the major gaps to address for improved performance, including:
+- treating the task as **classification** (not regression)
+- using windowing around keypress events
+- extracting features that emphasize transient keystroke signatures rather than baseline orientation/offset
 
-## Raw data format notes
+## Limitations / known issues
 
-The raw capture (`alphabet.ext`) follows a time-series pattern:
-- Most rows contain:
-  `timestamp, x, y, z`
-- Label events appear as separate rows containing a timestamp and a key label (e.g., `a`, `b`) with missing x/y/z values.
+- **Timestamp alignment is host-based:** serial transport can introduce small timing jitter.
+- **Windowing/feature extraction is minimal in the current baseline:** raw XYZ points may be dominated by baseline components rather than keystroke transients.
+- **Split strategy matters:** sensor time series can leak information if near-duplicate samples or adjacent windows from the same segment appear in both train and test.
+- **Hardware replication is not currently verified:** the original equipment is no longer available to re-check sensor model and wiring details.
 
-These label rows indicate where labeled segments begin and can be used to associate nearby accelerometer samples with the corresponding keypress class.
+## Recommended next steps
 
-## ML framing (high level)
+If extending this project, the most impactful improvements are:
 
-A typical ML workflow (implemented in `analysis.ipynb`) includes:
-1) parse the raw capture into continuous samples + label events  
-2) align labels to sensor samples using timestamps  
-3) window around each keypress event (fixed number of samples or fixed time span)  
-4) extract features and/or train window-based models  
-5) evaluate with an appropriate split strategy (e.g., by session/run to reduce leakage)
+- **Reformulate as classification**  
+  Use classifiers (e.g., `KNeighborsClassifier`, SVM, RandomForest) and report classification metrics (accuracy/F1/confusion matrix).
 
-## Limitations
+- **Add windowing around key events**  
+  Construct fixed windows around each keypress timestamp (e.g., 0.2s pre + 0.8s post) and label each window by the corresponding key.
 
-- Host-based timestamps and serial transport can introduce small timing jitter.
-- Without the original equipment, this repo focuses on the dataset, parsing, and ML analysis rather than hardware replication.
+- **Feature engineering**  
+  Add time- and frequency-domain features such as RMS, standard deviation, peak-to-peak amplitude, energy, and FFT band power.
+
+- **Evaluation with leakage control**  
+  Use session/segment-based splits to test generalization (not random shuffles of adjacent samples).
 
